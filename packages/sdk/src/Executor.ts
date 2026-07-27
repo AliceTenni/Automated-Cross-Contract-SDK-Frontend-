@@ -115,6 +115,8 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         account,
       })
 
+      // Notify listeners before the wallet signing prompt so the UI can
+      // display a "signing in wallet" indicator to the user.
       onSigningRestore?.()
       const signedRestoreXdr = await wallet.signTransaction(restoreTx.toXDR(), {
         networkPassphrase,
