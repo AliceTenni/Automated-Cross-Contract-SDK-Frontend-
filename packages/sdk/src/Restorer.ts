@@ -21,16 +21,17 @@ export interface BuildRestoreTxParams {
 
 /**
  * Builds a restore transaction that extends the TTL of archived ledger entries.
- * The fee is calculated as minResourceFee * RESTORE_FEE_MULTIPLIER.
+ * The fee is calculated as minResourceFee * config.restoreFeeMultiplier (default 100).
  */
 export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
   const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+  const restoreFeeMultiplier = (config as Required<typeof config>).restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER
 
   const account = preFetched ?? (await params.server.getAccount(sourcePublicKey))
 
-  const restoreFee = (minResourceFee * RESTORE_FEE_MULTIPLIER).toString()
+  const restoreFee = (minResourceFee * restoreFeeMultiplier).toString()
 
   const restoreTx = new TransactionBuilder(account, {
     fee: restoreFee,
