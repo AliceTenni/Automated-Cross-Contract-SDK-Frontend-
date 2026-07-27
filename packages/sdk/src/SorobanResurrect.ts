@@ -10,7 +10,7 @@ import {
 import { executeWithRestore } from './Executor.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreTransaction } from './Restorer.js'
-import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, RESTORE_FEE_MULTIPLIER } from './constants.js'
+import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, KNOWN_NETWORK_PASSPHRASES } from './constants.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -40,9 +40,20 @@ export class SorobanResurrect {
 
   constructor(config: SorobanResurrectConfig) {
     this.server = new rpc.Server(config.rpcUrl)
+    const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+    
+    // Validate network passphrase against known networks
+    if (!KNOWN_NETWORK_PASSPHRASES.includes(networkPassphrase)) {
+      console.warn(
+        `Warning: Unknown network passphrase "${networkPassphrase}". ` +
+        `Known networks: ${KNOWN_NETWORK_PASSPHRASES.join(', ')}. ` +
+        `Transactions may fail with cryptic errors if the passphrase is incorrect.`,
+      )
+    }
+    
     this.config = {
       rpcUrl: config.rpcUrl,
-      networkPassphrase: config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE,
+      networkPassphrase,
       pollIntervalMs: config.pollIntervalMs ?? POLL_INTERVAL_MS,
       pollTimeoutMs: config.pollTimeoutMs ?? POLL_TIMEOUT_MS,
       restoreFeeMultiplier: config.restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER,

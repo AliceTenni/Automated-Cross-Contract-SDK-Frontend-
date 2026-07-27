@@ -124,6 +124,9 @@ describe('executeWithRestore', () => {
   it('submits transaction directly when simulation succeeds (no restore)', async () => {
     vi.mocked(server.simulateTransaction).mockResolvedValue(makeSuccessResponse() as never)
     vi.mocked(server.sendTransaction).mockResolvedValue({ hash: 'tx-hash-123' } as never)
+    vi.mocked(server.getTransaction).mockResolvedValue({
+      status: rpc.Api.GetTransactionStatus.SUCCESS,
+    } as never)
 
     const wallet = makeWallet()
     const onOriginalSubmitted = vi.fn()
