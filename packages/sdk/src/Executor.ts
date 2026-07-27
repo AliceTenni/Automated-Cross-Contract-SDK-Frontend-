@@ -86,7 +86,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const archivedKeys = extractArchivedKeys(simResponse)
       onRestoreNeeded?.(archivedKeys)
 
-      if (!(await wallet.isConnected())) {
+      // Check wallet connection before attempting to get public key
+      const isConnected = await wallet.isConnected()
+      if (!isConnected) {
         const err = 'Wallet is not connected'
         onRestoreFailed?.(err)
         return {
@@ -160,11 +162,13 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
       const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
       if (!(signedOriginalTx instanceof Transaction)) {
+        const err = 'Failed to parse signed original transaction'
+        onRestoreFailed?.(err)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
           restoreTxHash: restoreResult.hash,
-          error: 'Failed to parse signed original transaction',
+          error: err,
         }
       }
 

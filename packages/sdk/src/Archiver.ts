@@ -111,16 +111,25 @@ export async function detectArchivedEntries(
     const chunk = ledgerKeys.slice(i, i + chunkSize)
     try {
       const result = await server.getLedgerEntries(...chunk)
-      const knownKeys = new Set((result.entries ?? []).map((e) => e.key.toXDR('base64')))
+      // Build a set of returned entry keys to identify archived ones
+      const knownKeys = new Set<string>()
+      if (result.entries) {
+        for (const entry of result.entries) {
+          knownKeys.add(entry.key.toXDR('base64'))
+        }
+      }
+      // Check each key in the chunk; if not in returned entries, it's archived
       for (const key of chunk) {
-        if (!knownKeys.has(key.toXDR('base64'))) {
+        const keyXdr = key.toXDR('base64')
+        if (!knownKeys.has(keyXdr)) {
           archived.push({
             key,
-            keyBase64: key.toXDR('base64'),
+            keyBase64: keyXdr,
           })
         }
       }
     } catch {
+      // On network error, conservatively treat all keys in chunk as archived
       archived.push(
         ...chunk.map((key) => ({
           key,
