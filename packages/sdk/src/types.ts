@@ -61,6 +61,12 @@ export interface SubmitWithRestoreOptions {
   transaction: Transaction
   /** Wallet adapter used for signing. */
   wallet: WalletAdapter
+  /** Called when restore transaction is ready to be signed. */
+  onSigningRestore?: () => void
+  /** Called after restore transaction is signed and being submitted. */
+  onSubmittingRestore?: () => void
+  /** Called after restore transaction is confirmed and original is ready to sign. */
+  onSigningOriginal?: () => void
   /** Called when archived entries are detected and restoration is required. */
   onRestoreNeeded?: (archivedKeys: ArchivedLedgerEntry[]) => void
   /** Called after the restore transaction is submitted. */

@@ -247,13 +247,21 @@ export class SorobanResurrect {
    * published to all registered listeners.
    */
   async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
-    const { transaction, wallet, onRestoreFailed, ...callbacks } = options
+    const { transaction, wallet, onRestoreFailed, onSigningRestore, onSubmittingRestore, onSigningOriginal, ...callbacks } = options
 
     const result = await executeWithRestore({
       server: this.server,
       transaction,
       wallet,
       config: this.config,
+      onSigningRestore: () => {
+        this.setState('signing_restore', 'Signing restore transaction...')
+        onSigningRestore?.()
+      },
+      onSubmittingRestore: () => {
+        this.setState('submitting_restore', 'Submitting restore transaction...')
+        onSubmittingRestore?.()
+      },
       onRestoreNeeded: (keys) => {
         this._lastArchivedKeys = keys
         this.setState('restore_needed', `Detected ${keys.length} archived ledger entries`)
@@ -266,12 +274,16 @@ export class SorobanResurrect {
       onRestoreConfirmed: (txHash) => {
         this.setState(
           'submitting_original',
-          'Restore confirmed. Submitting original transaction...',
+          'Restore confirmed. Preparing original transaction...',
         )
         callbacks.onRestoreConfirmed?.(txHash)
       },
+      onSigningOriginal: () => {
+        this.setState('signing_original', 'Signing original transaction...')
+        onSigningOriginal?.()
+      },
       onOriginalSubmitted: (txHash) => {
-        this.setState('success', 'Transaction submitted successfully')
+        this.setState('success', 'Original transaction submitted successfully')
         callbacks.onOriginalSubmitted?.(txHash)
       },
       onRestoreFailed: (error) => {

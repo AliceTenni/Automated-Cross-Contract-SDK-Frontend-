@@ -101,27 +101,39 @@ export async function waitForTransaction(
 
 /**
  * Extracts the XDR operations from a Transaction object, handling both
- * v0 and v1 envelope formats.
+ * regular (v0, v1) and fee-bump envelope formats.
+ *
+ * Fee-bump transactions wrap an inner transaction. This function extracts
+ * the operations from the inner transaction regardless of envelope format.
  */
 export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
   const envelope = tx.toEnvelope()
   const envelopeType = envelope.switch()
 
+  // Handle fee-bump transactions: extract the inner transaction first
+  if (envelopeType === xdr.EnvelopeType.envelopeTypeTxFeeBump()) {
+    const feeBumpEnvelope = envelope.value() as xdr.FeeBumpTransactionEnvelope
+    const innerEnvelope = feeBumpEnvelope.tx().innerTx()
+    const innerType = innerEnvelope.switch()
+
+    if (innerType === xdr.EnvelopeType.envelopeTypeTxV0()) {
+      // For V0 inner transaction, cast through unknown to handle type differences
+      const innerV0 = innerEnvelope.value() as unknown as xdr.TransactionV0Envelope
+      return innerV0.tx().operations()
+    }
+
+    // Default to V1 for fee-bump inner transactions
+    const innerV1 = innerEnvelope.value() as xdr.TransactionV1Envelope
+    return innerV1.tx().operations()
+  }
+
+  // Handle regular V0 transactions
   if (envelopeType === xdr.EnvelopeType.envelopeTypeTxV0()) {
     const v0Envelope = envelope.value() as xdr.TransactionV0Envelope
     return v0Envelope.tx().operations()
   }
 
-  if (envelopeType === xdr.EnvelopeType.envelopeTypeTxFeeBump()) {
-    const feeBumpEnvelope = envelope.value() as xdr.FeeBumpTransactionEnvelope
-    const innerEnvelope = feeBumpEnvelope.tx().innerTx()
-    const innerType = innerEnvelope.switch()
-    if (innerType === xdr.EnvelopeType.envelopeTypeTxV0()) {
-      return (innerEnvelope.value() as unknown as xdr.TransactionV0Envelope).tx().operations()
-    }
-    return (innerEnvelope.value() as xdr.TransactionV1Envelope).tx().operations()
-  }
-
+  // Default to V1 transactions
   const v1Envelope = envelope.value() as xdr.TransactionV1Envelope
   return v1Envelope.tx().operations()
 }
@@ -130,6 +142,8 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
  * Rebuilds the original transaction after a successful restore.
  * Fetches the latest account sequence number, re-signs with the
  * restored footprint, and re-simulates to assemble the final transaction.
+ *
+ * Reuses the original transaction's timeout if set, otherwise defaults to 30 seconds.
  *
  * Throws if the re-simulation still indicates archived entries or an error.
  */
@@ -143,6 +157,19 @@ export async function buildOriginalAfterRestore(
   const account = await server.getAccount(source)
   const operations = extractXdrOperations(originalTx)
 
+  // Extract the original transaction's timeout
+  let timeout = 30
+  if (originalTx.timeBounds) {
+    // timeBounds.maxTime is the absolute Unix timestamp when the tx expires.
+    // Convert to relative timeout by subtracting the current time.
+    const maxTime = parseInt(originalTx.timeBounds.maxTime, 10)
+    if (maxTime > 0) {
+      // maxTime is absolute, so compute relative timeout
+      const now = Math.floor(Date.now() / 1000)
+      timeout = Math.max(1, maxTime - now)
+    }
+  }
+
   const builder = new TransactionBuilder(account, {
     fee,
     networkPassphrase,
@@ -152,7 +179,7 @@ export async function buildOriginalAfterRestore(
     builder.addOperation(op)
   }
 
-  builder.setTimeout(30)
+  builder.setTimeout(timeout)
   const rawTx = builder.build()
 
   const sim = await server.simulateTransaction(rawTx)
