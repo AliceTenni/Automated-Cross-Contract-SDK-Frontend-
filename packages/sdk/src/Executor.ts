@@ -28,6 +28,12 @@ export interface ExecuteParams {
   wallet: WalletAdapter
   /** SDK configuration. */
   config: SorobanResurrectConfig
+  /** Called when restore transaction is ready to be signed. */
+  onSigningRestore?: () => void
+  /** Called after restore transaction is signed and being submitted. */
+  onSubmittingRestore?: () => void
+  /** Called after restore transaction is confirmed and original is ready to sign. */
+  onSigningOriginal?: () => void
   /** Called when archived entries are detected. */
   onRestoreNeeded?: (archivedKeys: ArchivedLedgerEntry[]) => void
   /** Called after the restore transaction is submitted. */
@@ -60,6 +66,9 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     transaction: originalTx,
     wallet,
     config,
+    onSigningRestore,
+    onSubmittingRestore,
+    onSigningOriginal,
     onRestoreNeeded,
     onRestoreSubmitted,
     onRestoreConfirmed,
@@ -84,7 +93,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
     if (isRestoreResponse(simResponse)) {
       const archivedKeys = extractArchivedKeys(simResponse)
-      onRestoreNeeded?.(archivedKeys)
 
       if (!(await wallet.isConnected())) {
         const err = 'Wallet is not connected'
@@ -100,86 +108,103 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
 
       const account = await server.getAccount(publicKey)
 
-      const restoreTx = await buildRestoreTransaction({
-        server,
-        sourcePublicKey: publicKey,
-        transactionData: simResponse.transactionData.build(),
-        minResourceFee: parseInt(simResponse.minResourceFee, 10),
-        config,
-        account,
-      })
+      try {
+        const restoreTx = await buildRestoreTransaction({
+          server,
+          sourcePublicKey: publicKey,
+          transactionData: simResponse.transactionData.build(),
+          minResourceFee: parseInt(simResponse.minResourceFee, 10),
+          config,
+          account,
+        })
 
-      const signedRestoreXdr = await wallet.signTransaction(restoreTx.toXDR(), {
-        networkPassphrase,
-      })
+        // Defer onRestoreNeeded until after restore tx is built
+        onRestoreNeeded?.(archivedKeys)
 
-      const signedRestoreTx = TransactionBuilder.fromXDR(signedRestoreXdr, networkPassphrase)
-      if (!(signedRestoreTx instanceof Transaction)) {
-        const err = 'Failed to parse signed restore transaction'
-        onRestoreFailed?.(err)
-        return {
-          success: false,
-          archivedKeysDetected: archivedKeys.length,
-          error: err,
+        onSigningRestore?.()
+        const signedRestoreXdr = await wallet.signTransaction(restoreTx.toXDR(), {
+          networkPassphrase,
+        })
+
+        const signedRestoreTx = TransactionBuilder.fromXDR(signedRestoreXdr, networkPassphrase)
+        if (!(signedRestoreTx instanceof Transaction)) {
+          const err = 'Failed to parse signed restore transaction'
+          onRestoreFailed?.(err)
+          return {
+            success: false,
+            archivedKeysDetected: archivedKeys.length,
+            error: err,
+          }
         }
-      }
 
-      const restoreResult = await server.sendTransaction(signedRestoreTx)
-      onRestoreSubmitted?.(restoreResult.hash)
+        onSubmittingRestore?.()
+        const restoreResult = await server.sendTransaction(signedRestoreTx)
+        onRestoreSubmitted?.(restoreResult.hash)
 
-      const restoreStatus = await waitForTransaction(
-        server,
-        restoreResult.hash,
-        pollInterval,
-        pollTimeout,
-      )
+        const restoreStatus = await waitForTransaction(
+          server,
+          restoreResult.hash,
+          pollInterval,
+          pollTimeout,
+        )
 
-      if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-        const err = 'Restore transaction failed'
-        onRestoreFailed?.(err)
+        if (restoreStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+          const err = 'Restore transaction failed'
+          onRestoreFailed?.(err)
+          return {
+            success: false,
+            archivedKeysDetected: archivedKeys.length,
+            restoreTxHash: restoreResult.hash,
+            error: err,
+          }
+        }
+
+        onRestoreConfirmed?.(restoreResult.hash)
+
+        const preparedTx = await buildOriginalAfterRestore(
+          server,
+          originalTx,
+          networkPassphrase,
+          originalTx.fee,
+        )
+
+        onSigningOriginal?.()
+        const signedOriginalXdr = await wallet.signTransaction(preparedTx.toXDR(), {
+          networkPassphrase,
+        })
+
+        const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
+        if (!(signedOriginalTx instanceof Transaction)) {
+          return {
+            success: false,
+            archivedKeysDetected: archivedKeys.length,
+            restoreTxHash: restoreResult.hash,
+            error: 'Failed to parse signed original transaction',
+          }
+        }
+
+        const originalResult = await server.sendTransaction(signedOriginalTx)
+        onOriginalSubmitted?.(originalResult.hash)
+
         return {
-          success: false,
-          archivedKeysDetected: archivedKeys.length,
+          success: true,
+          originalTxHash: originalResult.hash,
           restoreTxHash: restoreResult.hash,
-          error: err,
+          archivedKeysDetected: archivedKeys.length,
         }
-      }
-
-      onRestoreConfirmed?.(restoreResult.hash)
-
-      const preparedTx = await buildOriginalAfterRestore(
-        server,
-        originalTx,
-        networkPassphrase,
-        originalTx.fee,
-      )
-
-      const signedOriginalXdr = await wallet.signTransaction(preparedTx.toXDR(), {
-        networkPassphrase,
-      })
-
-      const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
-      if (!(signedOriginalTx instanceof Transaction)) {
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        onRestoreFailed?.(message)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
-          restoreTxHash: restoreResult.hash,
-          error: 'Failed to parse signed original transaction',
+          error: message,
         }
-      }
-
-      const originalResult = await server.sendTransaction(signedOriginalTx)
-      onOriginalSubmitted?.(originalResult.hash)
-
-      return {
-        success: true,
-        originalTxHash: originalResult.hash,
-        restoreTxHash: restoreResult.hash,
-        archivedKeysDetected: archivedKeys.length,
       }
     }
 
     if (isSuccessResponse(simResponse)) {
+      onSigningOriginal?.()
       const signedTx = await wallet.signTransaction(originalTx.toXDR(), { networkPassphrase })
       const parsedTx = TransactionBuilder.fromXDR(signedTx, networkPassphrase)
       if (!(parsedTx instanceof Transaction)) {
