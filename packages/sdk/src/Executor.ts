@@ -193,6 +193,22 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const sendResult = await server.sendTransaction(parsedTx)
       onOriginalSubmitted?.(sendResult.hash)
 
+      // Wait for confirmation on success path for consistency with restore path
+      const txStatus = await waitForTransaction(
+        server,
+        sendResult.hash,
+        pollInterval,
+        pollTimeout,
+      )
+
+      if (txStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+        return {
+          success: false,
+          archivedKeysDetected: 0,
+          error: 'Transaction failed to confirm',
+        }
+      }
+
       return {
         success: true,
         originalTxHash: sendResult.hash,
