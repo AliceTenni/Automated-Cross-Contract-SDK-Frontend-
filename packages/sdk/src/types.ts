@@ -11,6 +11,10 @@ export interface SorobanResurrectConfig {
   pollIntervalMs?: number
   /** Timeout in ms when waiting for transaction confirmation. */
   pollTimeoutMs?: number
+  /** Multiplier applied to minResourceFee when building a restore transaction (defaults to 100). */
+  restoreFeeMultiplier?: number
+  /** Method for detecting archived keys: 'simulation' (default) or 'direct'. */
+  archiveDetectionMethod?: 'simulation' | 'direct'
 }
 
 /** Wallet interface that wraps browser or extension wallets (e.g. Freighter). */

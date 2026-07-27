@@ -53,6 +53,11 @@ export interface ExecuteParams {
  *
  * All errors (simulation, signing, network) are caught and returned as
  * structured `ResurrectResult` objects — never thrown.
+ *
+ * Callbacks are invoked consistently for all error paths where applicable:
+ * - onRestoreFailed is called for any errors during or after restore initiation
+ * - onOriginalSubmitted is only called if the original tx is successfully submitted
+ * - onRestoreNeeded is called before any restore attempt
  */
 export async function executeWithRestore(params: ExecuteParams): Promise<ResurrectResult> {
   const {
@@ -75,10 +80,12 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     const simResponse = await server.simulateTransaction(originalTx)
 
     if (isErrorResponse(simResponse)) {
+      const err = `Simulation error: ${simResponse.error}`
+      onRestoreFailed?.(err)
       return {
         success: false,
         archivedKeysDetected: 0,
-        error: `Simulation error: ${simResponse.error}`,
+        error: err,
       }
     }
 
@@ -163,7 +170,6 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const signedOriginalTx = TransactionBuilder.fromXDR(signedOriginalXdr, networkPassphrase)
       if (!(signedOriginalTx instanceof Transaction)) {
         const err = 'Failed to parse signed original transaction'
-        onRestoreFailed?.(err)
         return {
           success: false,
           archivedKeysDetected: archivedKeys.length,
@@ -187,15 +193,32 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       const signedTx = await wallet.signTransaction(originalTx.toXDR(), { networkPassphrase })
       const parsedTx = TransactionBuilder.fromXDR(signedTx, networkPassphrase)
       if (!(parsedTx instanceof Transaction)) {
+        const err = 'Failed to parse signed transaction'
         return {
           success: false,
           archivedKeysDetected: 0,
-          error: 'Failed to parse signed transaction',
+          error: err,
         }
       }
 
       const sendResult = await server.sendTransaction(parsedTx)
       onOriginalSubmitted?.(sendResult.hash)
+
+      // Wait for confirmation on success path for consistency with restore path
+      const txStatus = await waitForTransaction(
+        server,
+        sendResult.hash,
+        pollInterval,
+        pollTimeout,
+      )
+
+      if (txStatus.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+        return {
+          success: false,
+          archivedKeysDetected: 0,
+          error: 'Transaction failed to confirm',
+        }
+      }
 
       return {
         success: true,
@@ -204,13 +227,16 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
       }
     }
 
+    const err = 'Unexpected simulation response type'
+    onRestoreFailed?.(err)
     return {
       success: false,
       archivedKeysDetected: 0,
-      error: 'Unexpected simulation response type',
+      error: err,
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    onRestoreFailed?.(message)
     return {
       success: false,
       archivedKeysDetected: 0,

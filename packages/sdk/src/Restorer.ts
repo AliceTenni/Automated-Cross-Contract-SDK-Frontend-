@@ -17,20 +17,38 @@ export interface BuildRestoreTxParams {
   config: SorobanResurrectConfig
   /** Pre-fetched account (avoids sequence-number race when calling concurrently). */
   account?: Account
+  /** Optional pre-fetched sequence number. If provided, avoids fetching the account.
+   *  Useful when building multiple transactions concurrently for the same source.
+   *  Note: When omitted, fetches the latest account via RPC, which may race with
+   *  concurrent calls. Callers should either provide this parameter or serialize calls. */
+  sequenceNumber?: string
 }
 
 /**
  * Builds a restore transaction that extends the TTL of archived ledger entries.
  * The fee is calculated as minResourceFee * RESTORE_FEE_MULTIPLIER.
+ *
+ * To avoid sequence-number race conditions when building multiple transactions
+ * concurrently for the same source, provide either the `account` or `sequenceNumber`
+ * parameter. If neither is provided, this function will fetch the account from RPC,
+ * which may cause the second concurrent call to get an out-of-sync sequence number.
  */
 export async function buildRestoreTransaction(params: BuildRestoreTxParams): Promise<Transaction> {
-  const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched } = params
+  const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+  const restoreFeeMultiplier = (config as Required<typeof config>).restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER
 
-  const account = preFetched ?? (await params.server.getAccount(sourcePublicKey))
+  let account = preFetched
+  if (!account) {
+    if (sequenceNumber !== undefined) {
+      account = new Account(sourcePublicKey, sequenceNumber)
+    } else {
+      account = await params.server.getAccount(sourcePublicKey)
+    }
+  }
 
-  const restoreFee = (minResourceFee * RESTORE_FEE_MULTIPLIER).toString()
+  const restoreFee = (minResourceFee * restoreFeeMultiplier).toString()
 
   const restoreTx = new TransactionBuilder(account, {
     fee: restoreFee,
@@ -48,8 +66,8 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
  * Polls for a transaction to reach a terminal status (SUCCESS or FAILED).
  *
  * Uses exponential backoff with jitter between polls to avoid hammering
- * the RPC endpoint. The base interval doubles on each retry, capped at
- * the configured pollIntervalMs, with random jitter of ±50%.
+ * the RPC endpoint. Delay starts at 100ms and doubles on each retry, capped at
+ * pollIntervalMs, with random jitter of ±50%.
  */
 export async function waitForTransaction(
   server: rpc.Server,
@@ -70,9 +88,10 @@ export async function waitForTransaction(
       return response
     }
 
-    // Exponential backoff with jitter: delay = min(base * 2^attempt, pollIntervalMs) * (0.5 + random * 0.5)
+    // Exponential backoff with jitter: delay = min(100ms * 2^attempt, pollIntervalMs) * (0.5 + random * 0.5)
     attempt++
-    const delay = Math.min(pollIntervalMs, 100 * Math.pow(2, attempt))
+    const exponentialDelay = 100 * Math.pow(2, attempt)
+    const delay = Math.min(exponentialDelay, pollIntervalMs)
     const jitter = delay * (0.5 + Math.random() * 0.5)
     await new Promise((resolve) => setTimeout(resolve, jitter))
   }
