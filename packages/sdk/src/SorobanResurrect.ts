@@ -186,16 +186,19 @@ export class SorobanResurrect {
         this.setState('restore_needed', `Detected ${keys.length} archived ledger entries`)
         callbacks.onRestoreNeeded?.(keys)
       },
+      onSigningRestore: () => {
+        this.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
+      },
       onRestoreSubmitted: (txHash) => {
         this.setState('confirming_restore', 'Waiting for restore confirmation...')
         callbacks.onRestoreSubmitted?.(txHash)
       },
       onRestoreConfirmed: (txHash) => {
-        this.setState(
-          'submitting_original',
-          'Restore confirmed. Submitting original transaction...',
-        )
+        this.setState('confirming_restore', 'Restore confirmed. Preparing original transaction...')
         callbacks.onRestoreConfirmed?.(txHash)
+      },
+      onSigningOriginal: () => {
+        this.setState('signing_original', 'Awaiting wallet signature for original transaction...')
       },
       onOriginalSubmitted: (txHash) => {
         this.setState('success', 'Transaction submitted successfully')

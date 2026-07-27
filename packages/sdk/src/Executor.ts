@@ -30,10 +30,14 @@ export interface ExecuteParams {
   config: SorobanResurrectConfig
   /** Called when archived entries are detected. */
   onRestoreNeeded?: (archivedKeys: ArchivedLedgerEntry[]) => void
+  /** Called when the wallet is prompted to sign the restore transaction. */
+  onSigningRestore?: () => void
   /** Called after the restore transaction is submitted. */
   onRestoreSubmitted?: (txHash: string) => void
   /** Called after the restore transaction is confirmed. */
   onRestoreConfirmed?: (txHash: string) => void
+  /** Called when the wallet is prompted to sign the original transaction. */
+  onSigningOriginal?: () => void
   /** Called after the original transaction is submitted. */
   onOriginalSubmitted?: (txHash: string) => void
   /** Called when the restore step of the workflow fails. */
@@ -61,8 +65,10 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
     wallet,
     config,
     onRestoreNeeded,
+    onSigningRestore,
     onRestoreSubmitted,
     onRestoreConfirmed,
+    onSigningOriginal,
     onOriginalSubmitted,
     onRestoreFailed,
   } = params
@@ -109,6 +115,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         account,
       })
 
+      onSigningRestore?.()
       const signedRestoreXdr = await wallet.signTransaction(restoreTx.toXDR(), {
         networkPassphrase,
       })
@@ -154,6 +161,7 @@ export async function executeWithRestore(params: ExecuteParams): Promise<Resurre
         originalTx.fee,
       )
 
+      onSigningOriginal?.()
       const signedOriginalXdr = await wallet.signTransaction(preparedTx.toXDR(), {
         networkPassphrase,
       })
