@@ -37,6 +37,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
   const { sourcePublicKey, transactionData, minResourceFee, config, account: preFetched, sequenceNumber } = params
 
   const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
+  const restoreFeeMultiplier = (config as Required<typeof config>).restoreFeeMultiplier ?? RESTORE_FEE_MULTIPLIER
 
   let account = preFetched
   if (!account) {
@@ -47,7 +48,7 @@ export async function buildRestoreTransaction(params: BuildRestoreTxParams): Pro
     }
   }
 
-  const restoreFee = (minResourceFee * RESTORE_FEE_MULTIPLIER).toString()
+  const restoreFee = (minResourceFee * restoreFeeMultiplier).toString()
 
   const restoreTx = new TransactionBuilder(account, {
     fee: restoreFee,
