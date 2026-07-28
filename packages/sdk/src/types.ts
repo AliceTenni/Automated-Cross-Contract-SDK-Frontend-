@@ -103,3 +103,24 @@ export interface RestoreStateInfo {
   /** Error message (only set in error state). */
   error?: string
 }
+
+/**
+ * Typed events emitted by SorobanResurrect for specific workflow transitions,
+ * in addition to the general-purpose `onStateChange` observer.
+ */
+export interface SorobanResurrectEvents {
+  /** Fired on every state transition (mirrors `onStateChange`). */
+  stateChange: RestoreStateInfo
+  /** Fired when archived entries are detected and restoration is required. */
+  restoreNeeded: ArchivedLedgerEntry[]
+  /** Fired after the restore transaction is submitted, with its tx hash. */
+  restoreSubmitted: string
+  /** Fired after the restore transaction is confirmed on-chain, with its tx hash. */
+  restoreConfirmed: string
+  /** Fired after the original transaction is submitted, with its tx hash. */
+  originalSubmitted: string
+  /** Fired once the full restore-and-submit workflow finishes, with the result. */
+  restoreComplete: ResurrectResult
+  /** Fired when the workflow fails, with the error message. */
+  error: string
+}
