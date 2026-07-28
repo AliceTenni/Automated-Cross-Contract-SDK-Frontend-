@@ -68,6 +68,12 @@ export interface ExecuteParams {
  * - onRestoreFailed is called for any errors during or after restore initiation
  * - onOriginalSubmitted is only called if the original tx is successfully submitted
  * - onRestoreNeeded is called before any restore attempt
+ *
+ * @param params - See {@link ExecuteParams}.
+ * @returns A {@link ResurrectResult} describing the outcome. `success` is
+ *   `false` for every failure path; this function itself does not throw.
+ * @see {@link SorobanResurrect.submitWithRestore} — the public, stateful
+ *   wrapper around this function used by SDK consumers.
  */
 export async function executeWithRestore(params: ExecuteParams): Promise<ResurrectResult> {
   const {
