@@ -256,7 +256,14 @@ npm run typecheck
 
 # Run example app
 npm run dev:example
+
+# Run the documentation site locally
+npm run docs:dev
 ```
+
+### Documentation Site
+
+The full documentation site (getting started guide, complete API reference, interactive examples, tutorial, and framework integration guides) lives in [`docs/`](./docs) and is built with [VitePress](https://vitepress.dev/). Run it locally with `npm run docs:dev`, or build the static site with `npm run docs:build`.
 
 ### Project Structure
 
