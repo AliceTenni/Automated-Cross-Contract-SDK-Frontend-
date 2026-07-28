@@ -303,4 +303,31 @@ export class SorobanResurrect {
 
     return result
   }
+
+  /**
+   * Detects archived ledger entries across multiple transactions at once.
+   * Returns one array of archived keys per input transaction, in the same
+   * order, useful for surfacing restore requirements ahead of a bulk submit.
+   */
+  async detectArchivedKeysBatch(transactions: Transaction[]): Promise<ArchivedLedgerEntry[][]> {
+    return Promise.all(transactions.map((transaction) => this.detectArchivedKeys(transaction)))
+  }
+
+  /**
+   * Submits multiple transactions with automatic archive restoration, one
+   * after another. Transactions are processed sequentially (rather than in
+   * parallel) to avoid sequence-number races when multiple transactions
+   * share the same source account.
+   *
+   * Each transaction's result is collected independently — a failure on one
+   * transaction does not prevent the remaining transactions from being
+   * processed.
+   */
+  async submitBatchWithRestore(items: SubmitWithRestoreOptions[]): Promise<ResurrectResult[]> {
+    const results: ResurrectResult[] = []
+    for (const item of items) {
+      results.push(await this.submitWithRestore(item))
+    }
+    return results
+  }
 }
