@@ -141,6 +141,10 @@ function WithdrawButton() {
 
 ## Architecture
 
+> For the full picture — system diagram, data flow, state machine, and
+> component interaction, all with Mermaid diagrams — see
+> [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
 ### CAP-0066 Restoration Flow
 
 The SDK implements the complete [CAP-0066](https://github.com/stellar/stellar-protocol/blob/master/core/cap-0066.md) restoration flow:
