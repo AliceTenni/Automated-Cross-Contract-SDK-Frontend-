@@ -289,6 +289,10 @@ npm run dev:example
 
 ---
 
+## Migrating
+
+See [MIGRATION.md](./MIGRATION.md) for breaking changes and upgrade steps between versions.
+
 ## License
 
 MIT
