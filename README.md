@@ -165,6 +165,11 @@ The SDK implements the complete [CAP-0066](https://github.com/stellar/stellar-pr
 
 ## API Reference
 
+> A more detailed reference — including `@throws` documentation and
+> cross-links between related methods — lives in
+> [`docs/API.md`](docs/API.md). Every public export also carries full
+> JSDoc in source.
+
 ### `SorobanResurrect` (SDK)
 
 ```typescript
