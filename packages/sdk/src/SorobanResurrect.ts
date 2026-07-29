@@ -11,8 +11,13 @@ import {
 import { executeWithRestore } from './Executor.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreTransaction } from './Restorer.js'
-import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, KNOWN_NETWORK_PASSPHRASES } from './constants.js'
-import { TypedEventEmitter } from './EventEmitter.js'
+import {
+  DEFAULT_NETWORK_PASSPHRASE,
+  POLL_INTERVAL_MS,
+  POLL_TIMEOUT_MS,
+  RESTORE_FEE_MULTIPLIER,
+  KNOWN_NETWORK_PASSPHRASES,
+} from './constants.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -21,6 +26,9 @@ import { TypedEventEmitter } from './EventEmitter.js'
  * building restore transactions, and submitting transactions with
  * automatic archive restoration. State changes are published to
  * registered listeners via the observer pattern.
+ *
+ * @see {@link SorobanResurrectConfig} for constructor options.
+ * @see {@link onStateChange} to subscribe to workflow state transitions.
  *
  * @example
  * ```ts
@@ -41,6 +49,24 @@ export class SorobanResurrect {
   private _listeners: Array<(info: RestoreStateInfo) => void> = []
   private _emitter = new TypedEventEmitter<SorobanResurrectEvents>()
 
+  /**
+   * Creates a new SDK instance bound to a single Soroban RPC endpoint.
+   *
+   * Logs a console warning (does not throw) if `networkPassphrase` is
+   * provided but does not match a known network — the instance is still
+   * created and usable.
+   *
+   * @param config - SDK configuration. Only `rpcUrl` is required; all
+   *   other fields fall back to sensible Testnet defaults.
+   *
+   * @example
+   * ```ts
+   * const resurrect = new SorobanResurrect({
+   *   rpcUrl: 'https://soroban-testnet.stellar.org',
+   *   networkPassphrase: Networks.TESTNET,
+   * })
+   * ```
+   */
   constructor(config: SorobanResurrectConfig) {
     this.server = new rpc.Server(config.rpcUrl)
     const networkPassphrase = config.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE
@@ -82,8 +108,23 @@ export class SorobanResurrect {
   /**
    * Registers a listener for state changes. Returns an unsubscribe function.
    *
-   * @param listener - Callback invoked on every state transition.
+   * Listener errors are caught and logged (via `console.warn`) so a
+   * misbehaving listener cannot break the workflow or prevent other
+   * listeners from being notified.
+   *
+   * @param listener - Callback invoked with a {@link RestoreStateInfo}
+   *   snapshot on every state transition.
    * @returns Function that removes the listener when called.
+   * @see {@link stateInfo} for the current snapshot without subscribing.
+   *
+   * @example
+   * ```ts
+   * const unsubscribe = resurrect.onStateChange((info) => {
+   *   console.log(info.state, info.message)
+   * })
+   * // later
+   * unsubscribe()
+   * ```
    */
   onStateChange(listener: (info: RestoreStateInfo) => void): () => void {
     this._listeners.push(listener)
@@ -146,6 +187,12 @@ export class SorobanResurrect {
   /**
    * Resets the instance back to idle state, clearing any archived keys
    * and error messages from previous workflows.
+   *
+   * @example
+   * ```ts
+   * resurrect.reset()
+   * console.log(resurrect.state) // 'idle'
+   * ```
    */
   reset() {
     this._lastError = undefined
@@ -156,6 +203,12 @@ export class SorobanResurrect {
   /**
    * Simulates a transaction on the Soroban RPC endpoint.
    * Updates internal state to 'simulating'.
+   *
+   * @param transaction - The transaction to simulate.
+   * @returns The raw {@link SimulateResponse} from the RPC server (success,
+   *   error, or restore-required response).
+   * @see {@link detectArchivedKeys} for a higher-level check that inspects
+   *   the simulation result for you.
    */
   async simulate(transaction: Transaction) {
     this.setState('simulating', 'Simulating transaction...')
@@ -172,6 +225,26 @@ export class SorobanResurrect {
    *
    * If archiveDetectionMethod is 'direct', queries the ledger directly for
    * keys that appear in the transaction footprint.
+   *
+   * Detection errors (network failures, RPC errors) are caught internally,
+   * logged via `console.warn`, and treated as "no archived keys found" — this
+   * method never throws.
+   *
+   * @param transaction - The transaction whose footprint should be checked
+   *   for archived ledger entries.
+   * @returns Array of {@link ArchivedLedgerEntry} — empty if nothing is
+   *   archived or detection failed.
+   * @see {@link needsRestore} for a boolean convenience wrapper.
+   * @see {@link buildRestoreTx} to build the transaction that restores the
+   *   detected keys.
+   *
+   * @example
+   * ```ts
+   * const archived = await resurrect.detectArchivedKeys(tx)
+   * if (archived.length > 0) {
+   *   console.log(`${archived.length} entries need restoring`)
+   * }
+   * ```
    */
   async detectArchivedKeys(transaction: Transaction): Promise<ArchivedLedgerEntry[]> {
     const method = (this.config as Required<typeof this.config>).archiveDetectionMethod ?? 'simulation'
@@ -228,6 +301,17 @@ export class SorobanResurrect {
   /**
    * Convenience method — returns true if the transaction requires
    * archive restoration before it can be submitted.
+   *
+   * @param transaction - The transaction to check.
+   * @returns `true` if one or more archived ledger entries were detected.
+   * @see {@link detectArchivedKeys} to get the actual archived keys.
+   *
+   * @example
+   * ```ts
+   * if (await resurrect.needsRestore(tx)) {
+   *   // show a "restoring state..." indicator before submitting
+   * }
+   * ```
    */
   needsRestore(transaction: Transaction): Promise<boolean> {
     return this.detectArchivedKeys(transaction).then((keys) => keys.length > 0)
@@ -243,11 +327,24 @@ export class SorobanResurrect {
    * If simulationResponse is not provided, the transaction is simulated first.
    * This will update internal state to 'simulating'.
    *
-   * Throws if the simulation does not indicate a restore is needed.
+   * @param sourcePublicKey - The source account public key that will pay
+   *   for and sign the restore transaction.
+   * @param transaction - The transaction to build a restore for.
+   * @param simulationResponse - Optional pre-computed simulation response
+   *   (to avoid state side-effects and a redundant RPC call).
+   * @returns An unsigned restore `Transaction` containing a
+   *   `restoreFootprint` operation, ready to be signed and submitted.
+   * @throws {Error} If the simulation (provided or freshly run) does not
+   *   indicate a restore is needed — call {@link needsRestore} first if
+   *   you're not sure.
+   * @see {@link submitWithRestore} for the full end-to-end workflow that
+   *   builds, signs, and submits the restore transaction automatically.
    *
-   * @param sourcePublicKey - The source account public key
-   * @param transaction - The transaction to build a restore for
-   * @param simulationResponse - Optional pre-computed simulation response (to avoid state side-effects)
+   * @example
+   * ```ts
+   * const restoreTx = await resurrect.buildRestoreTx(publicKey, tx)
+   * const signedXdr = await wallet.signTransaction(restoreTx.toXDR())
+   * ```
    */
   async buildRestoreTx(
     sourcePublicKey: string,
@@ -276,6 +373,38 @@ export class SorobanResurrect {
    * is built, signed, submitted, and confirmed before the original
    * transaction is rebuilt and submitted. State transitions are
    * published to all registered listeners.
+   *
+   * This method never throws — all failures (simulation errors, signing
+   * rejections, network errors, restore failures) are caught and returned
+   * as a {@link ResurrectResult} with `success: false` and an `error`
+   * message.
+   *
+   * @param options - See {@link SubmitWithRestoreOptions}. Requires a
+   *   `transaction` and a `wallet` adapter; all lifecycle callbacks are
+   *   optional.
+   * @returns A {@link ResurrectResult} describing the outcome, including
+   *   transaction hashes for the restore step (if any) and the original
+   *   transaction.
+   * @see {@link onStateChange} to observe fine-grained workflow state
+   *   transitions (`signing_restore`, `confirming_restore`, etc.) as they
+   *   happen, in addition to the final result.
+   * @see {@link needsRestore} to check ahead of time whether a restore
+   *   step will be needed.
+   *
+   * @example
+   * ```ts
+   * const result = await resurrect.submitWithRestore({
+   *   transaction: tx,
+   *   wallet,
+   *   onRestoreNeeded: (keys) => console.log(`Restoring ${keys.length} entries`),
+   * })
+   *
+   * if (result.success) {
+   *   console.log('Submitted:', result.originalTxHash)
+   * } else {
+   *   console.error('Failed:', result.error)
+   * }
+   * ```
    */
   async submitWithRestore(options: SubmitWithRestoreOptions): Promise<ResurrectResult> {
     const { transaction, wallet, onRestoreFailed, onSigningRestore, onSubmittingRestore, onSigningOriginal, ...callbacks } = options
@@ -285,8 +414,10 @@ export class SorobanResurrect {
       transaction,
       wallet,
       config: this.config,
+      // Wallet is about to prompt the user to sign the restore tx —
+      // surface this so the UI can show a signing indicator.
       onSigningRestore: () => {
-        this.setState('signing_restore', 'Signing restore transaction...')
+        this.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
         onSigningRestore?.()
       },
       onSubmittingRestore: () => {
@@ -298,11 +429,6 @@ export class SorobanResurrect {
         this.setState('restore_needed', `Detected ${keys.length} archived ledger entries`)
         this._emitter.emit('restoreNeeded', keys)
         callbacks.onRestoreNeeded?.(keys)
-      },
-      // Wallet is about to prompt the user to sign the restore tx —
-      // surface this so the UI can show a signing indicator.
-      onSigningRestore: () => {
-        this.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
       },
       onRestoreSubmitted: (txHash) => {
         this.setState('confirming_restore', 'Waiting for restore confirmation...')
