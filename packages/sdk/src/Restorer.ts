@@ -161,9 +161,12 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
       return innerV0.tx().operations()
     }
 
-    // Default to V1 for fee-bump inner transactions
-    const innerV1 = innerEnvelope.value() as xdr.TransactionV1Envelope
-    return innerV1.tx().operations()
+    if (innerType === xdr.EnvelopeType.envelopeTypeTx()) {
+      const innerV1 = innerEnvelope.value() as xdr.TransactionV1Envelope
+      return innerV1.tx().operations()
+    }
+
+    throw new Error(`Unsupported inner transaction envelope type in fee-bump transaction: ${innerType.name}`)
   }
 
   // Handle regular V0 transactions
@@ -172,9 +175,13 @@ export function extractXdrOperations(tx: Transaction): xdr.Operation[] {
     return v0Envelope.tx().operations()
   }
 
-  // Default to V1 transactions
-  const v1Envelope = envelope.value() as xdr.TransactionV1Envelope
-  return v1Envelope.tx().operations()
+  // Handle regular V1 transactions
+  if (envelopeType === xdr.EnvelopeType.envelopeTypeTx()) {
+    const v1Envelope = envelope.value() as xdr.TransactionV1Envelope
+    return v1Envelope.tx().operations()
+  }
+
+  throw new Error(`Unsupported transaction envelope type: ${envelopeType.name}`)
 }
 
 /**

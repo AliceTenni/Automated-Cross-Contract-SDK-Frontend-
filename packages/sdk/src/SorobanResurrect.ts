@@ -6,6 +6,7 @@ import {
   ArchivedLedgerEntry,
   ResurrectResult,
   SubmitWithRestoreOptions,
+  SorobanResurrectEvents,
 } from './types.js'
 import { executeWithRestore } from './Executor.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
@@ -46,6 +47,7 @@ export class SorobanResurrect {
   private _lastError: string | undefined
   private _lastArchivedKeys: ArchivedLedgerEntry[] = []
   private _listeners: Array<(info: RestoreStateInfo) => void> = []
+  private _emitter = new TypedEventEmitter<SorobanResurrectEvents>()
 
   /**
    * Creates a new SDK instance bound to a single Soroban RPC endpoint.
@@ -131,6 +133,33 @@ export class SorobanResurrect {
     }
   }
 
+  /**
+   * Registers a listener for a specific typed event (e.g. `restoreComplete`,
+   * `originalSubmitted`, `error`). Returns a function that removes it.
+   */
+  on<K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ): () => void {
+    return this._emitter.on(event, listener)
+  }
+
+  /** Registers a listener that fires at most once for the given event. */
+  once<K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ): () => void {
+    return this._emitter.once(event, listener)
+  }
+
+  /** Removes a previously registered listener for the given event. */
+  off<K extends keyof SorobanResurrectEvents>(
+    event: K,
+    listener: (payload: SorobanResurrectEvents[K]) => void,
+  ): void {
+    this._emitter.off(event, listener)
+  }
+
   private emitState() {
     const info = this.stateInfo
     for (const listener of this._listeners) {
@@ -140,6 +169,7 @@ export class SorobanResurrect {
         console.warn('SorobanResurrect: state listener error:', err)
       }
     }
+    this._emitter.emit('stateChange', info)
   }
 
   private setState(state: RestoreState, message: string) {
@@ -397,10 +427,12 @@ export class SorobanResurrect {
       onRestoreNeeded: (keys) => {
         this._lastArchivedKeys = keys
         this.setState('restore_needed', `Detected ${keys.length} archived ledger entries`)
+        this._emitter.emit('restoreNeeded', keys)
         callbacks.onRestoreNeeded?.(keys)
       },
       onRestoreSubmitted: (txHash) => {
         this.setState('confirming_restore', 'Waiting for restore confirmation...')
+        this._emitter.emit('restoreSubmitted', txHash)
         callbacks.onRestoreSubmitted?.(txHash)
       },
       onRestoreConfirmed: (txHash) => {
@@ -408,6 +440,7 @@ export class SorobanResurrect {
           'submitting_original',
           'Restore confirmed. Preparing original transaction...',
         )
+        this._emitter.emit('restoreConfirmed', txHash)
         callbacks.onRestoreConfirmed?.(txHash)
       },
       onSigningOriginal: () => {
@@ -416,9 +449,11 @@ export class SorobanResurrect {
       },
       onOriginalSubmitted: (txHash) => {
         this.setState('success', 'Original transaction submitted successfully')
+        this._emitter.emit('originalSubmitted', txHash)
         callbacks.onOriginalSubmitted?.(txHash)
       },
       onRestoreFailed: (error) => {
+        this._emitter.emit('error', error)
         onRestoreFailed?.(error)
       },
     })
@@ -426,8 +461,38 @@ export class SorobanResurrect {
     if (!result.success) {
       this._lastError = result.error
       this.setState('error', result.error ?? 'Unknown error')
+      this._emitter.emit('error', result.error ?? 'Unknown error')
     }
 
+    this._emitter.emit('restoreComplete', result)
+
     return result
+  }
+
+  /**
+   * Detects archived ledger entries across multiple transactions at once.
+   * Returns one array of archived keys per input transaction, in the same
+   * order, useful for surfacing restore requirements ahead of a bulk submit.
+   */
+  async detectArchivedKeysBatch(transactions: Transaction[]): Promise<ArchivedLedgerEntry[][]> {
+    return Promise.all(transactions.map((transaction) => this.detectArchivedKeys(transaction)))
+  }
+
+  /**
+   * Submits multiple transactions with automatic archive restoration, one
+   * after another. Transactions are processed sequentially (rather than in
+   * parallel) to avoid sequence-number races when multiple transactions
+   * share the same source account.
+   *
+   * Each transaction's result is collected independently — a failure on one
+   * transaction does not prevent the remaining transactions from being
+   * processed.
+   */
+  async submitBatchWithRestore(items: SubmitWithRestoreOptions[]): Promise<ResurrectResult[]> {
+    const results: ResurrectResult[] = []
+    for (const item of items) {
+      results.push(await this.submitWithRestore(item))
+    }
+    return results
   }
 }
