@@ -10,7 +10,7 @@ import {
 import { executeWithRestore } from './Executor.js'
 import { isRestoreResponse, extractArchivedKeys } from './Archiver.js'
 import { buildRestoreTransaction } from './Restorer.js'
-import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, KNOWN_NETWORK_PASSPHRASES } from './constants.js'
+import { DEFAULT_NETWORK_PASSPHRASE, POLL_INTERVAL_MS, POLL_TIMEOUT_MS, RESTORE_FEE_MULTIPLIER, KNOWN_NETWORK_PASSPHRASES } from './constants.js'
 
 /**
  * Main facade for the Soroban-Resurrect SDK.
@@ -44,11 +44,12 @@ export class SorobanResurrect {
     
     // Validate network passphrase against known networks
     if (!KNOWN_NETWORK_PASSPHRASES.includes(networkPassphrase)) {
-      console.warn(
-        `Warning: Unknown network passphrase "${networkPassphrase}". ` +
-        `Known networks: ${KNOWN_NETWORK_PASSPHRASES.join(', ')}. ` +
-        `Transactions may fail with cryptic errors if the passphrase is incorrect.`,
-      )
+      const knownNetworks = KNOWN_NETWORK_PASSPHRASES.map((p) => `"${p}"`).join(', ')
+      const message =
+        `Invalid network passphrase: "${networkPassphrase}". ` +
+        `Must be one of: ${knownNetworks}. ` +
+        `A typo in the passphrase will cause cryptic transaction failures.`
+      throw new Error(message)
     }
     
     this.config = {
@@ -254,23 +255,18 @@ export class SorobanResurrect {
       transaction,
       wallet,
       config: this.config,
-      onSigningRestore: () => {
-        this.setState('signing_restore', 'Signing restore transaction...')
-        onSigningRestore?.()
-      },
-      onSubmittingRestore: () => {
-        this.setState('submitting_restore', 'Submitting restore transaction...')
-        onSubmittingRestore?.()
-      },
       onRestoreNeeded: (keys) => {
         this._lastArchivedKeys = keys
         this.setState('restore_needed', `Detected ${keys.length} archived ledger entries`)
         callbacks.onRestoreNeeded?.(keys)
       },
-      // Wallet is about to prompt the user to sign the restore tx —
-      // surface this so the UI can show a signing indicator.
       onSigningRestore: () => {
         this.setState('signing_restore', 'Awaiting wallet signature for restore transaction...')
+        onSigningRestore?.()
+      },
+      onSubmittingRestore: () => {
+        this.setState('submitting_restore', 'Submitting restore transaction...')
+        onSubmittingRestore?.()
       },
       onRestoreSubmitted: (txHash) => {
         this.setState('confirming_restore', 'Waiting for restore confirmation...')
