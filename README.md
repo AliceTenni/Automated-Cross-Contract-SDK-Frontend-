@@ -1,5 +1,13 @@
 # Soroban-Resurrect
 
+[![npm sdk version](https://img.shields.io/npm/v/%40soroban-resurrect%2Fsdk?label=%40soroban-resurrect%2Fsdk)](https://www.npmjs.com/package/@soroban-resurrect/sdk)
+[![npm react-hook version](https://img.shields.io/npm/v/%40soroban-resurrect%2Freact-hook?label=%40soroban-resurrect%2Freact-hook)](https://www.npmjs.com/package/@soroban-resurrect/react-hook)
+[![CI](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/actions/workflows/ci.yml/badge.svg)](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/codecov/c/github/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-)](https://codecov.io/gh/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-?style=social)](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-)](https://github.com/Automated-Cross-Contract-SDK/Automated-Cross-Contract-SDK-Frontend-/issues)
+
 **Automated Cross-Contract State Restoration SDK & Wallet Middleware**
 
 Soroban-Resurrect solves the "archived ledger entry" problem for Soroban dApps. When a user's persistent data (token balance, loan position, etc.) expires due to TTL rent, their transaction fails with a cryptic error. This SDK automatically detects archived entries via CAP-0066 and seamlessly restores them before submitting the user's intended transaction.
